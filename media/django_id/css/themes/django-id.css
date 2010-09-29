@@ -1,0 +1,32 @@
+
+body {
+    color: #333940;
+    background: #f4f4f4;
+}
+
+/* LAYOUT */
+.post .date, .quote .date, .bookmark .date {
+	float: left;
+	padding: .3em .4em .3em 1.2em;
+	background: #c14040;
+	margin: 0.3em 0  0 -6.0em;
+	width: 3.8em;
+}
+.post .teaser{ border-bottom: solid 1.0em #333940;}
+
+.post .date {
+    text-align:center;
+}
+
+/* TYPE */
+h4{ color: #333940;}
+#right-rail p, #right-rail ul{ color: #333940;}
+
+/* LINKS */
+a:link, a:visited {
+    color: #092d1f;
+}
+a:hover { color: #333; }
+h2 a:link, h2 a:visited{ color: #092d1f;}
+h2 a:hover { color: #333;}
+
