@@ -1,7 +1,7 @@
 from __future__ import with_statement
 from fabric.api import env, run, local, sudo, put, prompt, settings, get
 from fabric.contrib.project import rsync_project, upload_project
-from fabric.contrib.files import append, upload_template, sed
+from fabric.contrib.files import append, upload_template, sed, exists
 from fabric.context_managers import cd
 from fabric.operations import local
 from time import strftime
@@ -18,14 +18,9 @@ APPLICATION_PATH = '%sproject/' % PROJECT_PATH
 
 REQUIREMENTS_FILE = "%srequirements.txt" % APPLICATION_PATH
 HOME_PATH = ('/home/%s/' % env.user)
-    
-TIME = strftime("%Y-%m-%d-%H-%M")
+
+TIME = strftime("%Y-%m-%d_%H:%M")
 PROJECT_NAME_TIME = ('project-%s' % TIME)
-
-
-def restart():
-    "Reboot Apache2 server."
-    sudo("apache2ctl graceful")
 
 def update_os():
 	sudo('apt-get update && apt-get upgrade -y')
@@ -48,14 +43,15 @@ def setup_virtual_env():
 	install_project_requirements()
 
 def install_project_requirements():
-	sudo('pip install -E %senv -r %s' % (PROJECT_PATH, REQUIREMENTS_FILE))
+    if exists(REQUIREMENTS_FILE):
+        sudo('pip install -E %senv -r %s' % (PROJECT_PATH, REQUIREMENTS_FILE))
 
 def setup():
     setup_os()
     setup_virtual_env()
 
 def setup_apache(TEMPLATE):
-	server_name = prompt('Enter server name:', 'server_name')	
+	server_name = prompt('Enter server name:', 'server_name')
 	upload_template(
 		'apache/%s' %TEMPLATE,
 		HOME_PATH,
@@ -68,56 +64,68 @@ def setup_apache(TEMPLATE):
 	sudo('mv %s /etc/apache2/sites-available/%s' % (TEMPLATE, PROJECT_NAME))
 	sudo('a2ensite %s' %PROJECT_NAME)
 	sudo('mkdir -p /var/log/www')
-	restart_apache()
-'''
-def setup_apache():
-	o = open("%s.com" % PROJECT_NAME,"a")
-	for line in open("apache/site.txt"):
-		line = line.replace("<server-name>","%s" % SERVER_NAME)
-		line = line.replace("<project_env>","%s" % APPLICATION_PATH)
-		o.write(line)
-	o.close()
-	
-	put('%s.com' % PROJECT_NAME, HOME_PATH )
-	sudo('mv %s%s.com /etc/apache2/sites-available/' %(HOME_PATH, PROJECT_NAME))
-	local('rm %s.com' % PROJECT_NAME)
-	#sudo('mv /etc/apache2/sites-available/site.conf /etc/apache2/sites-available/%s' % PROJECT_NAME)
-	sudo('a2ensite %s.com' %PROJECT_NAME)
-	sudo('mkdir -p /var/log/www')
-	restart_apache()
-'''
-def restart_apache():
+
+
+def apache_restart():
 	sudo('/etc/init.d/apache2 restart')
 
-def restart_mysql():
+def mysql_restart():
 	sudo('/etc/init.d/mysql restart')
-    
+	
 def deploy_project():
-	#upload_app()
-	#extract_app()
-	if not os.path.exists("%s" % PROJECT_PATH):
-		upload_project()
-		with cd(PROJECT_PATH):
-			sudo('ln -s project-%s project' % TIME)
-			sudo('cp -R project/media .')
-			sudo('chown -R www-data media')
-			sudo('chgrp -R www-data media')
-		setup_virtual_env()
-		setup_apache("site.conf.tpl")
-	else:
-		print"project ini telah dibuat sebelumnya"
-def upload_project(remote_dir = HOME_PATH, exclude = ['.git', '*.pyc', 'settings_local.py'], delete = False):
-	rsync_project(HOME_PATH, exclude = exclude, delete = delete)
-	sudo('mkdir -p %s' % PROJECT_PATH)
-	sudo("cp -R %s %sproject-%s" % (PROJECT_NAME, PROJECT_PATH, TIME))
-	sudo('ls %s | grep project-%s >> %srevisions.log' %(PROJECT_PATH, TIME, PROJECT_PATH))
-	sudo('echo "project-%s" > %scurrent_revision.log' %(TIME, PROJECT_PATH))
+    if not exists("%s" % PROJECT_PATH):
+        upload_project()
+        upload_template(
+		    'django/settings_local.py.tpl',
+		    HOME_PATH,
+		    context = {}
+	    )
+        with cd(PROJECT_PATH):
+            sudo('ln -s project-%s latest' % TIME)
+            sudo('cp -R latest/media .')
+            sudo('mv %ssettings_local.py.tpl latest/settings_local.py' % HOME_PATH)
+            sudo('mkdir -p log')
+            sudo('chown -R www-data log')
+            sudo('chown -R www-data media')
+            sudo('chgrp -R www-data media')
+            sudo('chown -R www-data log')
+            sudo('chgrp -R www-data log')
+        setup_virtual_env()
+        setup_apache("site.conf.tpl")
+        mysql_create_database()
+        print("""Finished setting up project environment.
+          \nNow edit your settings_local.py file, create your database and
+          run syncdb from %s/latest/""" % PROJECT_PATH)
+    else:
+        print('This project is already deployed. Run "fab update_project" instead')
+    
+    		    
+def upload_project(remote_dir=PROJECT_PATH, exclude = ['.git', '*.pyc', 'settings_local.py'], delete = True):
+    SYNC_PATH = '%supload' % PROJECT_PATH
+    sudo('mkdir -p %s' % PROJECT_PATH)
+    sudo('mkdir -p %s' % SYNC_PATH)
+    sudo('chmod -R 777 %s' % SYNC_PATH)
+    sudo('chown -R %s %s' % (env.user, SYNC_PATH))
+    rsync_project(SYNC_PATH, exclude=exclude, delete=delete)
+    sudo('sudo chmod -R 755 %s' % SYNC_PATH)
+    sudo('mkdir -p %s' % PROJECT_PATH)
+    sudo("cp -R %s/%s %sproject-%s" % (SYNC_PATH, PROJECT_NAME, PROJECT_PATH, TIME))
+    sudo('ls %s | grep project-%s >> %srevisions.log' %(PROJECT_PATH, TIME, PROJECT_PATH))
+    sudo('echo "project-%s" > %scurrent_revision.log' %(TIME, PROJECT_PATH))
+
+def project_cleanup():
+    """ Deletes all previous project versions except for the last three """
+    with cd(PROJECT_PATH):
+        old_dirs = run('ls -td project-*/').split('\n')[3:]
+        for directory in old_dirs:
+            sudo('rm -r %s' % directory)
+
 
 def deploy():
 	setup_os()
 	deploy_project()
 
-'''	
+'''
 def upload_app():
 	local('git archive --format=tar %s | gzip > %s.tar.gz' % (GIT_BRANCH, PROJECT_NAME))
 	put('%s.tar.gz' % PROJECT_NAME, HOME_PATH)
@@ -125,7 +133,7 @@ def upload_app():
 
 def extract_app():
 	with cd(HOME_PATH):
-		run('mkdir -p project-%s' % TIME) 
+		run('mkdir -p project-%s' % TIME)
 		run('cp %s.tar.gz project-%s/' %(PROJECT_NAME, TIME) )
 		with cd(PROJECT_NAME_TIME):
 			run('tar xfvz %s.tar.gz' % PROJECT_NAME)
@@ -137,57 +145,57 @@ def extract_app():
 def update_project(app_requirements= False):
 	upload_project()
 	with cd(PROJECT_PATH):
-		sudo('cp project/settings_local.py project-%s' % TIME)
-		sudo('rm -R project')
-		sudo('ln -s project-%s project' % TIME)
-		sudo('cp -R project/media .')
-		sudo('chown -R www-data media')
-		sudo('chgrp -R www-data media')
+		sudo('cp latest/settings_local.py project-%s' % TIME)
+		sudo('rm -R latest')
+		sudo('ln -s project-%s latest' % TIME)
+		sudo('cp -R latest/media .')
+		sudo('chown -R www-data media latest')
+		sudo('chgrp -R www-data media latest')
 	if app_requirements == True:
 		install_project_requirements()
-	restart_apache()
+	apache_restart()
 
 def backup(db_pass, db_user):
 	with cd("/srv"):
 		sudo("mkdir -p backup")
-	put('backup/Automysqlbackup-ui.sh', HOME_PATH)
+	put('backup/automysqlbackup-ui.sh', HOME_PATH)
 	put('backup/br-apache.sh', HOME_PATH)
 	o = open("backup/backup2.sh","a")
 	for line in open("backup/backup.sh"):
-		line = line.replace("<db_pass>","%s" %db_pass)	
+		line = line.replace("<db_pass>","%s" %db_pass)
 		line = line.replace("<db_user>","%s" %db_user)
 		o.write(line)
 	o.close()
-	sudo("mv Automysqlbackup-ui.sh /srv/backup/")
+	sudo("mv automysqlbackup-ui.sh /srv/backup/")
 	sudo("mv br-apache.sh /srv/backup/")
 	put('backup/backup2.sh', HOME_PATH)
 	sudo("mv backup2.sh /srv/backup/")
 	sudo("mv /srv/backup/backup2.sh /srv/backup/backup.sh")
 	sudo ("chmod +x /srv/backup/backup.sh")
 	local('rm backup/backup2.sh')
-	sudo('echo "00 1    8 * *   root    /srv/backup/backup.sh" >> /etc/crontab')
-	
-	
+	sudo('echo "00 1    * * *   root    /srv/backup/backup.sh" >> /etc/crontab')
+	sudo('echo "00 2    * * *   root    rsync -avz --delete /var/www /srv/backup/data/apache/" >> /etc/crontab')
+		
 def setup_backup_client():
 	"""Sets up target host to do automatic daily Apache and MySQL backup"""
 	prompt('Database user for mysql:', 'db_user')
-	env.db_pass = getpass('Database password for mysql:')	
+	env.db_pass = getpass('Database password for mysql:')
 	sudo("mkdir -p /srv/backup/data")
 	sudo("mkdir -p /srv/backup/periodic")
 	sudo("mkdir -p /srv/backup-scripts")
 
 	#Upload necessary templates and backup scripts
 	upload_template(
-	    'backup/backup.sh.tpl', 
-	    HOME_PATH, 
+	    'backup/backup.sh.tpl',
+	    HOME_PATH,
 	    context = {
 	        'db_user' : env.db_user,
 	        'db_pass' : env.db_pass,
 	    }
 	)
-	
+
 	put('backup/automysqlbackup-ui.sh', HOME_PATH)
-	put('backup/br-apache.sh', HOME_PATH)	
+	put('backup/br-apache.sh', HOME_PATH)
 	put('backup/last-full/userinspired-full-date', HOME_PATH)
 	put('backup/periodic.sh', HOME_PATH)
 	sudo("mv automysqlbackup-ui.sh /srv/backup-scripts/")
@@ -197,10 +205,10 @@ def setup_backup_client():
 	sudo("mkdir -p /srv/backup-scripts/last-full")
 	sudo("mv userinspired-full-date /srv/backup-scripts/last-full")
 	sudo("chmod +x /srv/backup-scripts/*.sh")
-	
-	append('00 1    * * *   root    /srv/backup-scripts/backup.sh', '/etc/crontab', use_sudo = True)    
-	append('00 2    * * *   root    /srv/backup-scripts/periodic.sh', '/etc/crontab', use_sudo = True)
 
+	append('00 1    * * *   root    /srv/backup-scripts/backup.sh', '/etc/crontab', use_sudo=True)
+	append('30 1    * * *   root    rsync -avz --delete /var/www /srv/backup/data/apache/', '/etc/crontab', use_sudo=True)
+	append('00 2    * * *   root    /srv/backup-scripts/periodic.sh', '/etc/crontab', use_sudo=True)
 
 
 def setup_backup_server():
@@ -219,15 +227,15 @@ def transfer_project(remote_dir = HOME_PATH, exclude = ['.git', '*.pyc', 'settin
 
 
 #Minor Varnish utilities
-def varnish_stats(port = 6082):	
+def varnish_stats(port = 6082):
     """Executes a stats command on varnish"""
     run('exec 9<>/dev/tcp/localhost/%(port)s ; echo -e "stats\nquit" >&9; cat <&9' % locals())
 
-def flush_varnish(port = 6082, expression = ".*"):	
+def varnish_flush(port = 6082, expression = ".*"):
     """Purge cached items in varnish"""
     run('exec 9<>/dev/tcp/localhost/%(port)s ; echo -e "url.purge %(expression)s\nquit" >&9; cat <&9' % locals())
 
-def setup_varnish():
+def varnish_setup():
 	sudo('apt-get install varnish -y')
 	port_number = prompt('Enter port number[6081]:', 'port_number')
 	upload_template(
@@ -243,30 +251,38 @@ def setup_varnish():
 def restart_varnish():
 	sudo('/etc/init.d/varnish restart')
 #Minor memcached utilities
-def memcached_stats(port = 11211):	
+def memcached_stats(port = 11211):
     """Executes a stats command on memcached"""
     run('exec 9<>/dev/tcp/localhost/%(port)s ; echo -e "stats\nquit" >&9; cat <&9' % locals())
 
 
-def restart_memcached():
-	sudo ('/etc/init.d/memcached stop && sudo /etc/init.d/memcached start')		
-	
-	
-def flush_memcached(port = 11211, seconds = 0):
+def memcached_restart():
+	sudo ('/etc/init.d/memcached stop && sudo /etc/init.d/memcached start')
+
+
+def memcached_flush(port = 11211, seconds = 0):
     """ Flushes all memcached items """
     run('exec 9<>/dev/tcp/localhost/%(port)s ; echo -e "flush_all %(seconds)s\nquit" >&9; cat <&9' % locals())
-    
-    
-def backup_mysql(db_user = 'root', db_pass=None, database='--all-databases'):
+
+
+def mysql_backup(db_user = 'root', db_pass=None, database='--all-databases'):
     '''Backup MySQL database(s)'''
     db_user = prompt('Database user to connect with [root]:') or 'root'
     env.db_pass = getpass('Database password to connect with []:')
     databases = prompt('Databases to backup [all]:') or '--all-databases'
     db_pass = '-p%s' % env.db_pass if env.db_pass else ''
-    outfile = '%s-%s-%s.sql.gz' % (env.host, databases.lstrip('--').replace(' ', '_'), TIME) 
+    outfile = '%s-%s-%s.sql.gz' % (env.host, databases.lstrip('--').replace(' ', '_'), TIME)
     run('mysqldump --opt -u %(db_user)s %(db_pass)s --databases %(databases)s | gzip > /tmp/%(outfile)s' % locals())
     get('/tmp/%(outfile)s' % locals(), '%(outfile)s' %locals())
     run('rm /tmp/%(outfile)s' % locals())
+
+
+def mysql_create_database(db_user = 'root', db_pass = None):
+    db_user = prompt('Server database user to connect with [root]:') or 'root'
+    env.db_pass = getpass('Server database password to connect with []:')
+    db_pass = '-p%s' % env.db_pass if env.db_pass else ''
+    db_name = prompt('New database name :')
+    run('echo "CREATE DATABASE %s" | mysql -u %s %s' % (db_name, db_user, db_pass))
 
 
 def mysql_move_tables(db_user = 'root', db_pass = None, database = '--all-databases'):
@@ -280,13 +296,13 @@ def mysql_move_tables(db_user = 'root', db_pass = None, database = '--all-databa
     5. Rename original tables to table_name_old in destination database
     6. Rename the new tables from table_name_new to table_name
     """
-    db_user = prompt('Database user to connect with [root]:') or 'root'
-    env.db_pass = getpass('Database password to connect with []:')
+    db_user = prompt('Source database user to connect with [root]:') or 'root'
+    env.db_pass = getpass('Source database password to connect with []:')
     db_pass = '-p%s' % env.db_pass if env.db_pass else ''
     db = prompt('Database name []:').strip()
     tables = prompt('Tables to move (separated by spaces) []:').strip().split()
     outfile = '/tmp/%s-%s.sql' % (db, '__'.join(tables))
-    
+
     #All of this is done on localhost
     local('mysqldump --opt -u %s %s %s %s > %s' % (db_user, db_pass, db, ' '.join(tables), outfile))
     for table in tables:
@@ -295,17 +311,21 @@ def mysql_move_tables(db_user = 'root', db_pass = None, database = '--all-databa
         local("sed -i.bak -r -e 's/CREATE TABLE `%s`/CREATE TABLE `%s`/g' %s" % (table, (table + '_new'), outfile))
         local("sed -i.bak -r -e 's/LOCK TABLES `%s` WRITE/LOCK TABLES `%s` WRITE/g' %s" % (table, (table + '_new'), outfile))
         local("sed -i.bak -r -e 's/ALTER TABLE `%s`/ALTER TABLE `%s`/g' %s" % (table, (table + '_new'), outfile))
-        local("sed -i.bak -r -e 's/INSERT INTO `%s` VALUES/INSERT INTO `%s` VALUES/g' %s" % (table, (table + '_new'), outfile))        
+        local("sed -i.bak -r -e 's/INSERT INTO `%s` VALUES/INSERT INTO `%s` VALUES/g' %s" % (table, (table + '_new'), outfile))
     local('cat %(outfile)s | gzip > %(outfile)s.gz' % locals())
     put('%s.gz' % outfile, '%s.gz' % outfile)
-    
+
+    db_user = prompt('Destination database user to connect with [root]:') or 'root'
+    env.db_pass = getpass('Destination database password to connect with []:')
+    db_pass = '-p%s' % env.db_pass if env.db_pass else ''
+
     #Now import the tables on destination host and rename
     run('gunzip < %s.gz | mysql -u %s %s %s' % (outfile, db_user, db_pass, db))
     rename_commands = ['ALTER TABLE %s RENAME %s_old;' % (table, table) for table in tables]
     rename_commands += ['ALTER TABLE %s_new RENAME %s;' % (table, table) for table in tables]
     rename_commands = ''.join(rename_commands)
     run('echo "use %s;%s" | mysql -u %s %s' % (db, rename_commands, db_user, db_pass))
-    
+
 # deploy word press project
 
 def deploy_wp_project(remote_dir = HOME_PATH, exclude = ['.git','apache','fabfile.py','fabfile.pyc'], delete = False):
@@ -320,12 +340,12 @@ def deploy_wp_project(remote_dir = HOME_PATH, exclude = ['.git','apache','fabfil
 		sudo('cp -R %s /var/www/%s' %(PROJECT_NAME, PROJECT_NAME))
 		sudo('a2enmod rewrite')
 		sudo('chown -R www-data %swp-content/uploads '% PROJECT_PATH)
-		sudo('chgrp -R www-data %swp-content/uploads '% PROJECT_PATH)	
+		sudo('chgrp -R www-data %swp-content/uploads '% PROJECT_PATH)
 		setup_apache("sitewp.tpl")
 		print "Anda harus melakukan import database anda sebelum mengakses ke website"
 	else:
 		print "Project ini telah dibuat sebelumnya"
-		
+
 	#upload_template(
 	#	'apache/sitewp.tpl',
 	#	HOME_PATH,
@@ -336,7 +356,7 @@ def deploy_wp_project(remote_dir = HOME_PATH, exclude = ['.git','apache','fabfil
 	#)
 	#sudo('mv sitewp.tpl /etc/apache2/sites-available/%s' % PROJECT_NAME)
 	#sudo('a2ensite %s' %PROJECT_NAME)
-	
+
 	#sudo('mkdir -p /var/log/www')
 
 
@@ -360,9 +380,9 @@ def upgrade_wordpress(upload_file="y"):
 def update_wp_project(remote_dir = HOME_PATH, exclude = ['.git','apache','fabfile.py','fabfile.pyc','wp-config.php'], delete = False):
 	rsync_project(HOME_PATH, exclude = exclude, delete = delete)
 	with cd(PROJECT_PATH):
-		sudo('mv /wp-content/themes/%s %s-%s.bak' % (PROJECT_NAME, PROJECT_NAME, TIME))	
+		sudo('mv /wp-content/themes/%s %s-%s.bak' % (PROJECT_NAME, PROJECT_NAME, TIME))
 		sudo('cp ~/%s/wp-content/themes/%s /wp-content/themes/'%(PROJECT_NAME, PROJECT_NAME))
-		restart_apache()
+		apache_restart()
 
 def backup_webserver():
 	sudo('./srv/backup/backup.sh')
@@ -371,7 +391,7 @@ def rollback():
 	get('%srevisions.log','revisions.log'% PROJECT_PATH)
 	get('%scurrent.log','current_revision.log'% PROJECT_PATH)
 	for rev in open("current.log"):
-		current_revision = rev	
+		current_revision = rev
 	i = 0
 	revision = {}
 	for line in open("revisions.log"):
@@ -381,15 +401,13 @@ def rollback():
 				print"no previous version"
 			else:
 				with cd(PROJECT_PATH):
-					sudo('rm -R project')
-					sudo('ln -s %s project' % revision[i-1].rstrip('\n'))	
-					sudo('cp -R project/media .')
+					sudo('rm -R latest')
+					sudo('ln -s %s latest' % revision[i-1].rstrip('\n'))
+					sudo('cp -R latest/media .')
 					sudo('chown -R www-data media')
 					sudo('chgrp -R www-data media')
-					sudo('echo "%s" > %scurrent_revision.log' %(revision[i-1].rstrip('\n'), PROJECT_PATH))					
+					sudo('echo "%s" > %scurrent_revision.log' %(revision[i-1].rstrip('\n'), PROJECT_PATH))
 		i = i+1
 	local('rm current_revision.log')
 	local('rm revisions.log')
-
-
 
