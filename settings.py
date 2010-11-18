@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 
 PROJECT_ROOT = os.path.dirname(__file__)
 MEDIA_ROOT = os.path.join(PROJECT_ROOT, 'media')
@@ -13,10 +14,12 @@ STATICFILES_DIRS = (
     os.path.join(PROJECT_ROOT, 'media', 'django_id'),
 )
 
+sys.path.append(os.path.join(PROJECT_ROOT, 'libraries'))
+
 SITE_ID = 1
 ROOT_URLCONF = 'urls'
 TIME_ZONE = 'America/New_York'
-SECRET_KEY = '+bq@o(jph^-*sfj4j%xukecxb0jae9lci&ysy=609hj@(l$47c'
+SECRET_KEY = '+bq@o(jph^-*sfj4ggj%xukecxb0jae9lci&ysy=609hj@(l$47c'
 USE_I18N = False
 HONEYPOT_FIELD_NAME = 'fonzie_kungfu'
 

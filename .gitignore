@@ -1,0 +1,15 @@
+media/attachments/*
+media/banners/*
+media/images/*
+media/uploads/*
+media/products
+media/CACHE/*
+build/*
+*.pyc
+*.pyo
+*.so
+*~
+*.db
+settings_local.py
+*.jpg.*
+search_index/*
