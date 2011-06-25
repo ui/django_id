@@ -1,4 +1,4 @@
-{% load disqus_tags flatblock_tags cache navbar generic_content blog compress analytics elsewhere feeds i18n archive %}
+{% load disqus_tags flatblock_tags cache navbar generic_content blog compress analytics elsewhere feeds i18n archive author_tags %}
 
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"
   "http://www.w3.org/TR/html4/strict.dtd">
@@ -108,6 +108,18 @@
           </ul>
           {% endif %}
           {% endcache %}       
+          
+
+            {% get_top_authors 10 as top_author_list %}
+            {% if top_author_list %}
+            <h4>{% trans "Top Authors" %}</h4>
+            <ul class="recent-posts">
+              {% for item in top_author_list %}
+              <li>{{ item }} ({{ item.total }})</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+
           
           {% cache 3600 "delicious.popular" %}
           {% parse_feed 'http://feeds.delicious.com/v2/rss/tag/django?count=15' as items %}

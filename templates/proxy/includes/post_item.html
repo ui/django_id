@@ -8,6 +8,7 @@
     </div>
     {% with object.content_object as post %}
         <h2><a href="{{ post.get_absolute_url }}">{{ object.title }}</a></h2>
+        <div class="author">ditulis oleh {{ object.content_object.author }}</div>
         {% if post.tease %}
             <p class="teaser">{{ post.tease|safe }}</p>
         {% endif %}

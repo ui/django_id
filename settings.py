@@ -9,7 +9,7 @@ ADMIN_MEDIA_PREFIX = '/admin_media/'
 
 #staticfiles app values
 STATIC_URL = '/media/django_id/'
-STATIC_ROOT = os.path.join(PROJECT_ROOT, 'media')
+STATIC_ROOT = os.path.join(PROJECT_ROOT, 'static')
 STATICFILES_DIRS = (
     os.path.join(PROJECT_ROOT, 'media', 'django_id'),
 )

@@ -287,3 +287,8 @@ h2 a:hover { font-weight: 400; color: #3c94bc;}
   display: none;
   margin-left: -1000;
 }
+
+.author {
+    font-size:13px;
+    font-style:italic;
+}
