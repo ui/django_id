@@ -6,6 +6,7 @@ media/products
 media/CACHE/*
 build/*
 *.pyc
+*.sqlite
 *.pyo
 *.so
 *~
